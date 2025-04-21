@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: 1.20.x
+
+      - name: Get dependencies
+        run: go mod download
+
+      - name: Run tests
+        run: go test -v ./...
+
+      - name: Extract version
+        id: extract_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Build release artifacts
+        env:
+          VERSION: ${{ steps.extract_version.outputs.VERSION }}
+        run: |
+          mkdir -p dist
+          platforms=("linux/amd64" "linux/arm64" "darwin/amd64" "darwin/arm64" "windows/amd64" "windows/arm64")
+          for platform in "${platforms[@]}"; do
+            os=${platform%/*}
+            arch=${platform#*/}
+            binary_name="summon-wpm"
+            if [ "$os" = "windows" ]; then
+              binary_name="$binary_name.exe"
+            fi
+            
+            echo "Building for $os/$arch..."
+            GOOS=$os GOARCH=$arch go build -o dist/summon-wpm-$os-$arch${os:+${os}-windows:+.exe} -ldflags "-X main.version=$VERSION" ./cmd/summon-wpm
+            
+            # Create archive
+            if [ "$os" = "windows" ]; then
+              (cd dist && zip summon-wpm-v$VERSION-$os-$arch.zip summon-wpm-$os-$arch.exe)
+            else
+              (cd dist && tar -czf summon-wpm-v$VERSION-$os-$arch.tar.gz summon-wpm-$os-$arch)
+            fi
+          done
+          ls -la dist/
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: summon-wpm v${{ steps.extract_version.outputs.VERSION }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            dist/summon-wpm-v${{ steps.extract_version.outputs.VERSION }}-*.tar.gz
+            dist/summon-wpm-v${{ steps.extract_version.outputs.VERSION }}-*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
