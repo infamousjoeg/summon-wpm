@@ -30,8 +30,8 @@ jobs:
           go test -race -coverprofile=coverage.txt -covermode=atomic ./...
           go tool cover -func=coverage.txt
 
-  build:
-    name: Build
+  build-linux-windows:
+    name: Build Linux/Windows
     needs: test
     runs-on: ubuntu-latest
     strategy:
@@ -41,8 +41,6 @@ jobs:
             arch: amd64
           - os: linux
             arch: arm64
-          - os: darwin
-            arch: universal
           - os: windows
             arch: amd64
           - os: windows
@@ -63,16 +61,11 @@ jobs:
         run: |
           mkdir -p dist
           
-          if [ "${{ matrix.os }}" = "darwin" ] && [ "${{ matrix.arch }}" = "universal" ]; then
-            # Build universal macOS binary
-            GOARCH=amd64 GOOS=darwin go build -o dist/summon-wpm-amd64 -ldflags "-X main.version=$(grep "version = " cmd/summon-wpm/main.go | cut -d '"' -f2)" ./cmd/summon-wpm
-            GOARCH=arm64 GOOS=darwin go build -o dist/summon-wpm-arm64 -ldflags "-X main.version=$(grep "version = " cmd/summon-wpm/main.go | cut -d '"' -f2)" ./cmd/summon-wpm
-            lipo -create -output dist/summon-wpm-${{ matrix.os }}-${{ matrix.arch }} dist/summon-wpm-amd64 dist/summon-wpm-arm64
-          elif [ "${{ matrix.os }}" = "windows" ]; then
+          if [ "${{ matrix.os }}" = "windows" ]; then
             # Build Windows binary with .exe extension
             GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build -o dist/summon-wpm-${{ matrix.os }}-${{ matrix.arch }}.exe -ldflags "-X main.version=$(grep "version = " cmd/summon-wpm/main.go | cut -d '"' -f2)" ./cmd/summon-wpm
           else
-            # Build regular binary
+            # Build Linux binary
             GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build -o dist/summon-wpm-${{ matrix.os }}-${{ matrix.arch }} -ldflags "-X main.version=$(grep "version = " cmd/summon-wpm/main.go | cut -d '"' -f2)" ./cmd/summon-wpm
           fi
 
@@ -81,4 +74,40 @@ jobs:
         with:
           name: summon-wpm-${{ matrix.os }}-${{ matrix.arch }}
           path: dist/summon-wpm-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.os == 'windows' && '.exe' || '' }}
+          if-no-files-found: error
+
+  build-macos:
+    name: Build macOS Universal
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: 1.20.x
+
+      - name: Get dependencies
+        run: go mod download
+
+      - name: Build universal macOS binary
+        run: |
+          mkdir -p dist
+          
+          # Build for Intel
+          GOOS=darwin GOARCH=amd64 go build -o dist/summon-wpm-darwin-amd64 -ldflags "-X main.version=$(grep "version = " cmd/summon-wpm/main.go | cut -d '"' -f2)" ./cmd/summon-wpm
+          
+          # Build for Apple Silicon
+          GOOS=darwin GOARCH=arm64 go build -o dist/summon-wpm-darwin-arm64 -ldflags "-X main.version=$(grep "version = " cmd/summon-wpm/main.go | cut -d '"' -f2)" ./cmd/summon-wpm
+          
+          # Create universal binary
+          lipo -create -output dist/summon-wpm-darwin-universal dist/summon-wpm-darwin-amd64 dist/summon-wpm-darwin-arm64
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: summon-wpm-darwin-universal
+          path: dist/summon-wpm-darwin-universal
           if-no-files-found: error
