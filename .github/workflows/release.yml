@@ -35,25 +35,32 @@ jobs:
           VERSION: ${{ steps.extract_version.outputs.VERSION }}
         run: |
           mkdir -p dist
-          platforms=("linux/amd64" "linux/arm64" "darwin/amd64" "darwin/arm64" "windows/amd64" "windows/arm64")
-          for platform in "${platforms[@]}"; do
-            os=${platform%/*}
-            arch=${platform#*/}
-            binary_name="summon-wpm"
-            if [ "$os" = "windows" ]; then
-              binary_name="$binary_name.exe"
-            fi
-            
-            echo "Building for $os/$arch..."
-            GOOS=$os GOARCH=$arch go build -o dist/summon-wpm-$os-$arch${os:+${os}-windows:+.exe} -ldflags "-X main.version=$VERSION" ./cmd/summon-wpm
-            
-            # Create archive
-            if [ "$os" = "windows" ]; then
-              (cd dist && zip summon-wpm-v$VERSION-$os-$arch.zip summon-wpm-$os-$arch.exe)
-            else
-              (cd dist && tar -czf summon-wpm-v$VERSION-$os-$arch.tar.gz summon-wpm-$os-$arch)
-            fi
-          done
+          
+          # Build Linux binaries
+          echo "Building for linux/amd64..."
+          GOOS=linux GOARCH=amd64 go build -o dist/summon-wpm-linux-amd64 -ldflags "-X main.version=$VERSION" ./cmd/summon-wpm
+          (cd dist && tar -czf summon-wpm-v$VERSION-linux-amd64.tar.gz summon-wpm-linux-amd64)
+          
+          echo "Building for linux/arm64..."
+          GOOS=linux GOARCH=arm64 go build -o dist/summon-wpm-linux-arm64 -ldflags "-X main.version=$VERSION" ./cmd/summon-wpm
+          (cd dist && tar -czf summon-wpm-v$VERSION-linux-arm64.tar.gz summon-wpm-linux-arm64)
+          
+          # Build macOS universal binary
+          echo "Building universal macOS binary..."
+          GOOS=darwin GOARCH=amd64 go build -o dist/summon-wpm-darwin-amd64 -ldflags "-X main.version=$VERSION" ./cmd/summon-wpm
+          GOOS=darwin GOARCH=arm64 go build -o dist/summon-wpm-darwin-arm64 -ldflags "-X main.version=$VERSION" ./cmd/summon-wpm
+          lipo -create -output dist/summon-wpm-darwin-universal dist/summon-wpm-darwin-amd64 dist/summon-wpm-darwin-arm64
+          (cd dist && tar -czf summon-wpm-v$VERSION-darwin-universal.tar.gz summon-wpm-darwin-universal)
+          
+          # Build Windows binaries
+          echo "Building for windows/amd64..."
+          GOOS=windows GOARCH=amd64 go build -o dist/summon-wpm-windows-amd64.exe -ldflags "-X main.version=$VERSION" ./cmd/summon-wpm
+          (cd dist && zip summon-wpm-v$VERSION-windows-amd64.zip summon-wpm-windows-amd64.exe)
+          
+          echo "Building for windows/arm64..."
+          GOOS=windows GOARCH=arm64 go build -o dist/summon-wpm-windows-arm64.exe -ldflags "-X main.version=$VERSION" ./cmd/summon-wpm
+          (cd dist && zip summon-wpm-v$VERSION-windows-arm64.zip summon-wpm-windows-arm64.exe)
+          
           ls -la dist/
 
       - name: Create Release

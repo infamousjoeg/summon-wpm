@@ -36,8 +36,17 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        goos: [linux, darwin, windows]
-        goarch: [amd64, arm64]
+        include:
+          - os: linux
+            arch: amd64
+          - os: linux
+            arch: arm64
+          - os: darwin
+            arch: universal
+          - os: windows
+            arch: amd64
+          - os: windows
+            arch: arm64
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -51,19 +60,25 @@ jobs:
         run: go mod download
 
       - name: Build binary
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
         run: |
-          BINARY_NAME=summon-wpm
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            BINARY_NAME=$BINARY_NAME.exe
+          mkdir -p dist
+          
+          if [ "${{ matrix.os }}" = "darwin" ] && [ "${{ matrix.arch }}" = "universal" ]; then
+            # Build universal macOS binary
+            GOARCH=amd64 GOOS=darwin go build -o dist/summon-wpm-amd64 -ldflags "-X main.version=$(grep "version = " cmd/summon-wpm/main.go | cut -d '"' -f2)" ./cmd/summon-wpm
+            GOARCH=arm64 GOOS=darwin go build -o dist/summon-wpm-arm64 -ldflags "-X main.version=$(grep "version = " cmd/summon-wpm/main.go | cut -d '"' -f2)" ./cmd/summon-wpm
+            lipo -create -output dist/summon-wpm-${{ matrix.os }}-${{ matrix.arch }} dist/summon-wpm-amd64 dist/summon-wpm-arm64
+          elif [ "${{ matrix.os }}" = "windows" ]; then
+            # Build Windows binary with .exe extension
+            GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build -o dist/summon-wpm-${{ matrix.os }}-${{ matrix.arch }}.exe -ldflags "-X main.version=$(grep "version = " cmd/summon-wpm/main.go | cut -d '"' -f2)" ./cmd/summon-wpm
+          else
+            # Build regular binary
+            GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} go build -o dist/summon-wpm-${{ matrix.os }}-${{ matrix.arch }} -ldflags "-X main.version=$(grep "version = " cmd/summon-wpm/main.go | cut -d '"' -f2)" ./cmd/summon-wpm
           fi
-          go build -o dist/$BINARY_NAME-${{ matrix.goos }}-${{ matrix.goarch }} -ldflags "-X main.version=$(grep "version = " cmd/summon-wpm/main.go | cut -d '"' -f2)" ./cmd/summon-wpm
 
       - name: Upload binaries
         uses: actions/upload-artifact@v4
         with:
-          name: summon-wpm-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/summon-wpm-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: summon-wpm-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/summon-wpm-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.os == 'windows' && '.exe' || '' }}
           if-no-files-found: error
