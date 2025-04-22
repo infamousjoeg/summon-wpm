@@ -1,10 +1,14 @@
 package auth
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/infamousjoeg/summon-wpm/internal/api"
@@ -13,22 +17,45 @@ import (
 
 // AuthenticateWithClientCredentials performs non-interactive authentication using client credentials
 func AuthenticateWithClientCredentials(cfg *config.Config, configFile string) error {
-	tokenReq := TokenRequest{
-		GrantType:    "client_credentials",
-		ClientID:     cfg.ClientID,
-		ClientSecret: cfg.ClientSecret,
-	}
+	// Create form data
+	data := url.Values{}
+	data.Set("grant_type", "client_credentials")
+	data.Set("client_id", cfg.ClientID)
+	data.Set("client_secret", cfg.ClientSecret)
 
-	tokenBody, err := json.Marshal(tokenReq)
+	// Create request
+	req, err := http.NewRequest("POST",
+		strings.TrimRight(cfg.TenantURL, "/")+TokenEndpoint,
+		strings.NewReader(data.Encode()))
+
 	if err != nil {
-		return fmt.Errorf("error marshaling token request: %s", err)
+		return fmt.Errorf("error creating request: %s", err)
 	}
 
-	tokenResp, err := api.MakeRequest(cfg, "POST", TokenEndpoint, bytes.NewBuffer(tokenBody))
+	// Set proper headers for form data
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+
+	// Make request
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("token request failed: %s", err)
 	}
+	defer resp.Body.Close()
 
+	// Check response
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("request failed with status: %s", resp.Status)
+	}
+
+	// Read response
+	tokenResp, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("error reading response: %s", err)
+	}
+
+	// Parse token response
 	var tokenResponse TokenResponse
 	if err := json.Unmarshal(tokenResp, &tokenResponse); err != nil {
 		return fmt.Errorf("error parsing token response: %s", err)
@@ -48,29 +75,45 @@ func AuthenticateWithClientCredentials(cfg *config.Config, configFile string) er
 
 // GetAppCredentials retrieves application credentials from CyberArk Identity
 func GetAppCredentials(cfg *config.Config, appID string) (string, error) {
-	appCredReq := AppCredRequest{
-		AppID: appID,
-	}
+	// Create the endpoint URL with query parameter
+	endpoint := fmt.Sprintf("%s?appkey=%s", GetAppCredsEndpoint, url.QueryEscape(appID))
 
-	appCredBody, err := json.Marshal(appCredReq)
-	if err != nil {
-		return "", fmt.Errorf("error marshaling app cred request: %s", err)
-	}
+	// Enable verbose debugging
+	fmt.Fprintf(os.Stderr, "Making request to: %s%s\n", cfg.TenantURL, endpoint)
 
-	appCredResp, err := api.MakeAuthenticatedRequest(cfg, "POST", GetAppCredsEndpoint, bytes.NewBuffer(appCredBody))
+	// Make request with empty body since we're using query parameters
+	appCredResp, err := api.MakeAuthenticatedRequest(cfg, "POST", endpoint, nil)
 	if err != nil {
 		return "", fmt.Errorf("app credentials request failed: %s", err)
 	}
 
+	// Print full response for debugging
+	fmt.Fprintf(os.Stderr, "Raw response: %s\n", string(appCredResp))
+
+	// Parse the response
 	var appCredResponse AppCredResponse
 	if err := json.Unmarshal(appCredResp, &appCredResponse); err != nil {
 		return "", fmt.Errorf("error parsing app cred response: %s", err)
 	}
 
-	if !appCredResponse.Success {
-		return "", fmt.Errorf("get app credentials failed: %s", appCredResponse.ErrorMsg)
+	// Check for errors
+	if appCredResponse.Error != nil {
+		return "", fmt.Errorf("get app credentials failed: %v", appCredResponse.Error)
 	}
 
-	// Return the password
-	return appCredResponse.Password, nil
+	// Check if Result contains data
+	if appCredResponse.Result == nil || len(appCredResponse.Result) == 0 {
+		return "", errors.New("empty result from API - credential not found or access denied")
+	}
+
+	// Extract the password from the Result map
+	for _, possibleKey := range []string{"Password", "password", "secret", "value", "credential"} {
+		if val, ok := appCredResponse.Result[possibleKey].(string); ok {
+			return val, nil
+		}
+	}
+
+	// If we can't find any password field, dump the contents for debugging
+	resultBytes, _ := json.Marshal(appCredResponse.Result)
+	return "", fmt.Errorf("password not found in result: %s", string(resultBytes))
 }

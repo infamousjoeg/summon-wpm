@@ -13,8 +13,8 @@ import (
 const (
 	StartAuthEndpoint   = "/Security/StartAuthentication"
 	AdvanceAuthEndpoint = "/Security/AdvanceAuthentication"
-	TokenEndpoint       = "/oauth2/token"
-	GetAppCredsEndpoint = "/UserMgmt/GetAppCreds"
+	TokenEndpoint       = "/oauth2/platformtoken"
+	GetAppCredsEndpoint = "/UPRest/GetMCFA"
 )
 
 // StartAuthRequest represents the request body for starting authentication
@@ -26,7 +26,7 @@ type StartAuthRequest struct {
 // StartAuthResponse represents the response from start authentication
 type StartAuthResponse struct {
 	Success    bool        `json:"success"`
-	Result     string      `json:"Result"`
+	Result     interface{} `json:"Result"`
 	SessionID  string      `json:"SessionId"`
 	Challenges []Challenge `json:"Challenges"`
 	ErrorID    int         `json:"ErrorId"`
@@ -87,13 +87,8 @@ type AppCredRequest struct {
 
 // AppCredResponse represents the response from getting app credentials
 type AppCredResponse struct {
-	Success  bool   `json:"success"`
-	Result   string `json:"Result"`
-	ErrorID  int    `json:"ErrorId"`
-	ErrorMsg string `json:"ErrorMsg"`
-	AppKey   string `json:"AppKey"`
-	Username string `json:"Username"`
-	Password string `json:"Password"`
+	Result map[string]interface{} `json:"Result"`
+	Error  interface{}            `json:"Error"`
 }
 
 // IsInteractive checks if the program is running in an interactive terminal

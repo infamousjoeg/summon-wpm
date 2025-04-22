@@ -56,7 +56,9 @@ func main() {
 			}
 		}
 
-		if err := auth.Authenticate(cfg, configFile, true); err != nil {
+		forceInteractive := !(cfg.ClientID != "" && cfg.ClientSecret != "")
+
+		if err := auth.Authenticate(cfg, configFile, forceInteractive); err != nil {
 			fmt.Fprintf(os.Stderr, "Authentication failed: %s\n", err)
 			os.Exit(1)
 		}
